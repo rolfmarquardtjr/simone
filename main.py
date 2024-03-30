@@ -1,6 +1,7 @@
 import streamlit as st
 import sqlite3
 import pandas as pd
+import io
 
 # Inicialização do banco de dados e criação das tabelas
 def inicializar_db():
@@ -65,19 +66,42 @@ def buscar_todos_alunos():
         cursor.execute("SELECT id, nome, serie, tutor FROM alunos;")
         return cursor.fetchall()
 
-# Função para buscar detalhes de um aluno específico
-def buscar_detalhes_aluno(aluno_id):
+# Função para buscar os nomes de todos os alunos
+def buscar_nomes_alunos():
     with sqlite3.connect('escola.db') as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT * FROM alunos WHERE id = ?", (aluno_id,))
+        cursor.execute("SELECT nome FROM alunos;")
+        nomes = cursor.fetchall()
+        # Extrai os nomes de alunos de tuplas para uma lista
+        return [nome[0] for nome in nomes]
+
+# Função para buscar detalhes de um aluno específico pelo nome
+def buscar_detalhes_aluno(nome_aluno):
+    with sqlite3.connect('escola.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM alunos WHERE nome = ?", (nome_aluno,))
         return cursor.fetchone()
 
-# Função para excluir um aluno
-def excluir_aluno(aluno_id):
+# Função para excluir um aluno pelo nome
+def excluir_aluno(nome_aluno):
     with sqlite3.connect('escola.db') as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM alunos WHERE id = ?", (aluno_id,))
+        cursor.execute("DELETE FROM alunos WHERE nome = ?", (nome_aluno,))
         conn.commit()
+
+# Função modificada para exportar alunos para Excel e retornar como objeto de bytes
+def exportar_alunos_para_excel():
+    with sqlite3.connect('escola.db') as conn:
+        # Consulta para buscar todos os alunos
+        df_alunos = pd.read_sql_query("SELECT * FROM alunos", conn)
+
+    # Usando um objeto BytesIO como um arquivo na memória
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df_alunos.to_excel(writer, index=False)
+    output.seek(0)  # Volta ao início do objeto BytesIO
+
+    return output
 
 # Interface principal do Streamlit
 def main():
@@ -90,8 +114,6 @@ def main():
 
     if st.session_state.logado:
         st.sidebar.success("Você está logado.")
-        
-        # Cadastrar novos administradores (Omitido para focar nas funcionalidades principais)
         
         nome = st.text_input("Nome do aluno:")
         idade = st.number_input("Idade:", min_value=5, max_value=100, step=1)
@@ -111,26 +133,38 @@ def main():
             inserir_aluno(nome, idade, serie, numero, eletiva, projeto_vida, tutor, clube, tarefa, khan, redacao, leia_sp, itinerario_formativo)
             st.success("Aluno cadastrado com sucesso!")
             
-        # Listagem e exclusão de alunos
+        # Listagem e exclusão de alunos por nome
         st.subheader("Alunos Cadastrados")
         alunos = buscar_todos_alunos()
         df_alunos = pd.DataFrame(alunos, columns=['ID', 'Nome', 'Série', 'Tutor'])
         st.table(df_alunos)
         
-        aluno_id_excluir = st.selectbox("Selecionar aluno para excluir:", df_alunos['ID'])
-        if st.button("Excluir Aluno"):
-            excluir_aluno(aluno_id_excluir)
+        nomes_alunos = buscar_nomes_alunos()  # Obtem os nomes dos alunos
+        nome_aluno_excluir = st.selectbox("Digite ou selecione o nome do aluno para excluir:", [''] + nomes_alunos)
+        if nome_aluno_excluir and st.button("Excluir Aluno"):
+            excluir_aluno(nome_aluno_excluir)
             st.success("Aluno excluído com sucesso.")
             st.experimental_rerun()
         
-        # Visualização de detalhes de alunos
-        aluno_id_detalhes = st.selectbox("Selecionar aluno para ver detalhes:", df_alunos['ID'], key='detalhes')
-        if st.button("Ver Detalhes"):
-            detalhes = buscar_detalhes_aluno(aluno_id_detalhes)
+        # Visualização de detalhes de alunos por nome
+        nome_aluno_detalhes = st.selectbox("Digite ou selecione o nome do aluno para ver detalhes:", [''] + nomes_alunos, key='detalhes')
+        if nome_aluno_detalhes and st.button("Ver Detalhes"):
+            detalhes = buscar_detalhes_aluno(nome_aluno_detalhes)
             if detalhes:
                 detalhes_df = pd.DataFrame([detalhes[1:]], columns=['Nome', 'Idade', 'Série', 'Número', 'Eletiva', 'Projeto Vida', 'Tutor', 'Clube', 'Tarefa', 'Khan', 'Redação', 'Leia SP', 'Itinerário Formativo'])
                 st.table(detalhes_df)
+            else:
+                st.error("Aluno não encontrado.")
                 
+        if st.button("Exportar Alunos para Excel"):
+            dados_excel = exportar_alunos_para_excel()
+            st.download_button(
+                label="Baixar Excel",
+                data=dados_excel,
+                file_name="alunos_exportados.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        
         if st.sidebar.button("Logout"):
             st.session_state.logado = False
             st.experimental_rerun()
